@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits, MessageFlags } = require('discord.js');
+const { Client, GatewayIntentBits, MessageFlags, REST, Routes } = require('discord.js');
 const cfg = require('./config');
 const { commands, handleVerifyConfirm } = require('./commands');
 const { runMatchmaking, handleQueueButton } = require('./matchmaking');
@@ -7,14 +7,29 @@ const { handlePartyButton } = require('./party');
 const { sweepMatches } = require('./timeouts');
 
 if (!cfg.token || !cfg.guildId) {
-  console.error('DISCORD_TOKEN dan GUILD_ID wajib diisi di .env');
+  console.error('DISCORD_TOKEN dan GUILD_ID wajib diisi (Variables di Railway / .env)');
   process.exit(1);
 }
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
-client.once('ready', () => {
+// Daftarkan semua slash command ke server (dijalankan otomatis tiap bot start)
+async function registerCommands(clientId) {
+  try {
+    const body = [...commands.values()].map((c) => c.data.toJSON());
+    const rest = new REST({ version: '10' }).setToken(cfg.token);
+    await rest.put(Routes.applicationGuildCommands(clientId, cfg.guildId), { body });
+    console.log(`✅ ${body.length} slash command terdaftar di server ${cfg.guildId}`);
+  } catch (err) {
+    console.error('[register] gagal daftar command:', err);
+  }
+}
+
+client.once('clientReady', async () => {
   console.log(`🔥 VDP Ranked online sebagai ${client.user.tag}`);
+
+  await registerCommands(client.user.id);
+
   // Matchmaking berkala: jarak MMR yang diizinkan melebar seiring waktu antre
   setInterval(() => runMatchmaking(client), cfg.matchmakingIntervalMs);
   // Timeout match: pengingat, void otomatis, atau dispute
