@@ -1,0 +1,19 @@
+{
+  "name": "vdp-ranked",
+  "version": "1.1.0",
+  "description": "VDP Ranked - Discord ranked bot untuk Violence District (Roblox)",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "deploy": "node src/deploy-commands.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@napi-rs/canvas": "^0.1.56",
+    "better-sqlite3": "^11.3.0",
+    "discord.js": "^14.16.3",
+    "dotenv": "^16.4.5"
+  }
+}
