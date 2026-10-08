@@ -351,18 +351,18 @@ add(
       .setColor(0xe74c3c)
       .setTitle('🔥 VDP RANKED')
       .setDescription(
-        'Pilih role, lalu tunggu match ditemukan.\n\n' +
+        'Tekan **Join Queue**, lalu tunggu match ditemukan.\n\n' +
           '**Format:** 1 🔪 Killer vs 4 🏃 Survivor\n' +
+          '**Role:** diacak otomatis saat match ditemukan 🎲\n' +
           '**Wajib:** akun Roblox terverifikasi (`/verify`)\n' +
-          '**Party:** `/party create` → `/party invite` → leader tekan **Party Queue** (sisi Survivor)\n\n' +
+          '**Party:** `/party create` → `/party invite` → leader tekan **Party Queue** (party selalu jadi Survivor)\n\n' +
           'Rating Killer & Survivor dihitung **terpisah**. Menang/kalah juga memberi **Ranked Points**.'
       );
     const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('q:killer').setLabel('🔪 Join Killer').setStyle(ButtonStyle.Danger),
-      new ButtonBuilder().setCustomId('q:survivor').setLabel('🏃 Join Survivor').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId('q:party').setLabel('👥 Party Queue').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('q:join').setLabel('🎮 Join Queue').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('q:party').setLabel('👥 Party Queue').setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId('q:leave').setLabel('❌ Leave Queue').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId('q:rank').setLabel('📊 My Rank').setStyle(ButtonStyle.Primary)
+      new ButtonBuilder().setCustomId('q:rank').setLabel('📊 My Rank').setStyle(ButtonStyle.Secondary)
     );
     await i.channel.send({ embeds: [embed], components: [row] });
     return i.reply({ content: '✅ Panel dikirim.', flags: EPHEMERAL });
