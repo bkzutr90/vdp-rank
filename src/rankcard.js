@@ -103,9 +103,11 @@ function renderRankCard(o) {
     ctx.strokeStyle = rgba(col, 0.6);
     ctx.lineWidth = 2;
     ctx.stroke();
+    const parts = o.tier.name.split(' ');
+    const glyph = (parts.length > 1 ? parts.map((w) => w[0]).join('') : o.tier.name.slice(0, 2)).toUpperCase();
     ctx.fillStyle = '#ffffff';
-    ctx.font = font(52);
-    ctx.fillText(o.tier.name[0], W / 2, 170);
+    ctx.font = font(40);
+    ctx.fillText(glyph, W / 2, 164);
 
     // Nama pemain
     const name = o.name.length > 22 ? o.name.slice(0, 21) + '…' : o.name;
