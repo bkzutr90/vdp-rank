@@ -45,7 +45,7 @@ client.once('clientReady', async () => {
   sweepMatches(client);
   // Status queue live: perbarui pesan penunggu & panel secara otomatis
   startLive(client);
-  // Musik 24/7: masuk lagi ke voice channel terakhir
+  // Musik 24/7: init Lavalink lalu masuk lagi ke voice channel terakhir
   restoreMusic(client);
 });
 
