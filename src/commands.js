@@ -11,7 +11,7 @@ const crypto = require('crypto');
 const cfg = require('./config');
 const { db, getSeason, setSeason, setFrozen, clearFrozen, isFrozen, nowSec, getStat, overall } = require('./db');
 const { lookupUser, getDescription, profileUrl } = require('./roblox');
-const { rankEmbed, overallLabel } = require('./embeds');
+const { rankPayload, overallLabel, emblemOf, rowTier } = require('./embeds');
 const { sendAdmin, freezeRow, isMod } = require('./matches');
 const { syncRank } = require('./roles');
 const party = require('./party');
@@ -120,7 +120,7 @@ add(
     .addUserOption((o) => o.setName('player').setDescription('Pemain lain (opsional)')),
   async (i) => {
     const user = i.options.getUser('player') || i.user;
-    return i.reply({ embeds: [rankEmbed(user)] });
+    return i.reply(rankPayload(user));
   }
 );
 
@@ -186,7 +186,7 @@ function seasonRows(kind, season) {
       .all(season)
       .map((r) => ({ discord_id: r.discord_id, text: `${r.v} win streak` }));
   }
-  return topRows(kind, season, 10).map((r) => ({ discord_id: r.discord_id, text: `${r.mmr} MMR` }));
+  return topRows(kind, season, 10).map((r) => ({ discord_id: r.discord_id, mmr: r.mmr, text: `${r.mmr} MMR` }));
 }
 
 // Leaderboard rolling window (weekly = 7 hari terakhir, monthly = 30 hari terakhir)
@@ -256,8 +256,12 @@ add(
     const kindTitle = { overall: '🏆 OVERALL', killer: '🔪 KILLER', survivor: '🏃 SURVIVOR', streak: '🔥 WIN STREAK', rp: '💰 RANKED POINTS' }[kind];
     const periodTitle = { season: `SEASON ${String(season).padStart(2, '0')}`, weekly: 'WEEKLY', monthly: 'MONTHLY' }[period];
 
+    // Ikon tier per baris (dari MMR role pada board role, selain itu MMR keseluruhan)
+    const tiers = rows.map((r) => rowTier(r.discord_id, r.mmr));
     const body = rows.length
-      ? rows.map((r, idx) => `${MEDALS[idx] || `**${idx + 1}.**`} <@${r.discord_id}> — ${r.text}`).join('\n')
+      ? rows
+          .map((r, idx) => `${MEDALS[idx] || `**${idx + 1}.**`} ${tiers[idx] ? `${tiers[idx].emoji} ` : ''}<@${r.discord_id}> — ${r.text}`)
+          .join('\n')
       : period === 'season'
         ? 'Belum ada data untuk leaderboard ini.'
         : 'Belum ada pemain dengan minimal 3 match di periode ini.';
@@ -268,7 +272,14 @@ add(
         text: `${WINDOWS[period]} hari terakhir • diurutkan dari ${kind === 'rp' ? 'RP' : 'MMR'} yang didapat • minimal 3 match`,
       });
     }
-    return i.reply({ embeds: [embed], allowedMentions: { parse: [] } });
+    // Emblem tier pemain peringkat 1 sebagai thumbnail
+    const files = [];
+    const em = emblemOf(tiers[0]);
+    if (em) {
+      embed.setThumbnail(`attachment://${em.name}`);
+      files.push(em.attachment);
+    }
+    return i.reply({ embeds: [embed], files, allowedMentions: { parse: [] } });
   }
 );
 
