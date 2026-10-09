@@ -8,7 +8,7 @@ const cfg = require('./config');
 const { db, matchTag, nowSec, getSeason, overall, isFrozen, removeFromQueue } = require('./db');
 const { profileUrl } = require('./roblox');
 const { resultButtons } = require('./matches');
-const { rankEmbed } = require('./embeds');
+const { rankPayload } = require('./embeds');
 const { getPartyOf, members, isPartyQueued } = require('./party');
 
 let running = false;
@@ -244,7 +244,7 @@ async function handleQueueButton(interaction, action, client) {
   const need = cfg.survivorsPerMatch + 1;
 
   if (action === 'rank') {
-    return interaction.editReply({ embeds: [rankEmbed(interaction.user)] });
+    return interaction.editReply(rankPayload(interaction.user));
   }
 
   if (action === 'leave') {
