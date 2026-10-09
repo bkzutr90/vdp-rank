@@ -2,6 +2,7 @@ const {
   ChannelType,
   EmbedBuilder,
   MessageFlags,
+  OverwriteType,
   PermissionFlagsBits,
 } = require('discord.js');
 const cfg = require('./config');
@@ -154,16 +155,19 @@ async function createMatch(client, killer, survivors) {
       PermissionFlagsBits.AttachFiles,
       PermissionFlagsBits.ReadMessageHistory,
     ];
+    // `type` wajib disebut eksplisit: tanpa itu discord.js mencari ID di cache dan gagal
+    // ("not a cached User or Role") untuk pemain yang belum ada di cache bot.
     const overwrites = [
-      { id: guild.id, deny: [PermissionFlagsBits.ViewChannel] },
+      { id: guild.id, type: OverwriteType.Role, deny: [PermissionFlagsBits.ViewChannel] },
       // Bot harus punya akses eksplisit, karena deny @everyone juga mencabut akses lihat channel dari bot
       {
         id: client.user.id,
+        type: OverwriteType.Member,
         allow: [...allow, PermissionFlagsBits.EmbedLinks, PermissionFlagsBits.ManageChannels],
       },
-      ...ids.map((id) => ({ id, allow })),
+      ...ids.map((id) => ({ id, type: OverwriteType.Member, allow })),
     ];
-    if (cfg.modRoleId) overwrites.push({ id: cfg.modRoleId, allow });
+    if (cfg.modRoleId) overwrites.push({ id: cfg.modRoleId, type: OverwriteType.Role, allow });
 
     channel = await guild.channels.create({
       name: `match-${String(matchId).padStart(6, '0')}`,
