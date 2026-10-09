@@ -10,7 +10,7 @@ const {
 } = require('discord.js');
 const crypto = require('crypto');
 const cfg = require('./config');
-const { db, getSeason, setSeason, setFrozen, clearFrozen, isFrozen, nowSec, getStat, overall } = require('./db');
+const { db, getSeason, setSeason, setFrozen, clearFrozen, isFrozen, nowSec, getStat, overall, removeFromQueue } = require('./db');
 const { lookupUser, getDescription, profileUrl } = require('./roblox');
 const { rankPayload, overallLabel, emblemOf, rowTier } = require('./embeds');
 const { sendAdmin, freezeRow, isMod } = require('./matches');
@@ -451,6 +451,60 @@ add(
 
     return i.editReply({
       content: `✅ MMR ${roleLabel} <@${target.id}>: ${old} → **${next}** (${sign}${diff})${skip ? '\n📌 Placement role ini dianggap selesai.' : ''}${rankChange}`,
+      allowedMentions: { parse: [] },
+    });
+  }
+);
+
+// ---------------------------------------------------------------- /reset-player (admin)
+add(
+  new SlashCommandBuilder()
+    .setName('reset-player')
+    .setDescription('Reset statistik pemain: MMR, win/loss, placement, streak, peak, dan RP (admin)')
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .addUserOption((o) => o.setName('player').setDescription('Pemain yang di-reset').setRequired(true))
+    .addBooleanOption((o) =>
+      o.setName('semua_season').setDescription('Reset juga data season sebelumnya (default: hanya season ini)')
+    )
+    .addStringOption((o) => o.setName('alasan').setDescription('Alasan (tercatat di log admin)').setMaxLength(300)),
+  async (i) => {
+    if (!isMod(i)) return i.reply({ content: '❌ Hanya admin/mod.', flags: EPHEMERAL });
+    await i.deferReply({ flags: EPHEMERAL });
+
+    const target = i.options.getUser('player', true);
+    const allSeasons = i.options.getBoolean('semua_season') || false;
+    const reason = i.options.getString('alasan') || '-';
+    const season = getSeason();
+
+    db.transaction(() => {
+      if (allSeasons) {
+        db.prepare('DELETE FROM stats WHERE discord_id=?').run(target.id);
+        db.prepare('DELETE FROM rp WHERE discord_id=?').run(target.id);
+      } else {
+        db.prepare('DELETE FROM stats WHERE discord_id=? AND season=?').run(target.id, season);
+        db.prepare('DELETE FROM rp WHERE discord_id=? AND season=?').run(target.id, season);
+      }
+    })();
+    removeFromQueue(target.id);
+
+    // Data dibuat ulang otomatis dari awal; sinkronkan role tier (pemain kembali Unranked)
+    await syncRank(i.client, target.id, overall(target.id));
+
+    const embed = new EmbedBuilder()
+      .setColor(0xe67e22)
+      .setTitle('♻️ PLAYER RESET')
+      .addFields(
+        { name: 'Pemain', value: `<@${target.id}>`, inline: true },
+        { name: 'Cakupan', value: allSeasons ? 'Semua season' : `Season ${season}`, inline: true },
+        { name: 'Oleh', value: `<@${i.user.id}>`, inline: true },
+        { name: 'Alasan', value: reason }
+      );
+    await sendAdmin(i.client, { embeds: [embed], allowedMentions: { parse: [] } });
+
+    return i.editReply({
+      content:
+        `♻️ Statistik <@${target.id}> di ${allSeasons ? 'semua season' : `season ${season}`} sudah di-reset ` +
+        `(MMR kembali ${cfg.startMmr}, placement 0/${cfg.placementGames}, W/L, streak, peak, dan RP kosong).`,
       allowedMentions: { parse: [] },
     });
   }
