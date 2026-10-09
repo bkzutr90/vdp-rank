@@ -2,18 +2,42 @@
 // Mode 24/7: bot TIDAK keluar saat voice kosong / queue habis / stop. Satu-satunya cara keluar: /leave.
 // Channel voice terakhir disimpan di tabel settings, jadi bot masuk lagi otomatis setelah restart / ke-disconnect.
 const path = require('path');
+const { execFile } = require('child_process');
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 const { DisTube } = require('distube');
 const { YtDlpPlugin } = require('@distube/yt-dlp');
-const { db } = require('./db');
 const { generateDependencyReport } = require('@discordjs/voice');
-console.log(generateDependencyReport());
+const { db } = require('./db');
 
 const EPHEMERAL = MessageFlags.Ephemeral;
 const NO_PING = { parse: [] };
 const KEY = 'music_vc';
 
 let distube = null;
+
+// Lokasi binary yt-dlp bawaan @distube/yt-dlp (src/music.js -> ../node_modules/...)
+const YTDLP = path.join(__dirname, '..', 'node_modules', '@distube', 'yt-dlp', 'bin', 'yt-dlp');
+
+// Cari lagu di YouTube lewat yt-dlp langsung, kembalikan URL video pertama.
+// Dipakai karena pencarian lewat plugin menghasilkan NO_RESULT tanpa pesan error asli.
+function searchYoutube(query) {
+  return new Promise((resolve, reject) => {
+    execFile(
+      YTDLP,
+      [`ytsearch1:${query}`, '--flat-playlist', '--no-warnings', '--print', 'id'],
+      { timeout: 30000 },
+      (err, stdout, stderr) => {
+        if (err) {
+          console.error('[music] yt-dlp search stderr:', stderr);
+          return reject(new Error((stderr || err.message).trim().split('\n').pop()));
+        }
+        const id = stdout.trim().split('\n')[0];
+        if (!id) return reject(new Error('Tidak ada hasil pencarian'));
+        resolve(`https://www.youtube.com/watch?v=${id}`);
+      }
+    );
+  });
+}
 
 // ------------------------------------------------------------------ simpan channel 24/7
 const getSaved = () => db.prepare('SELECT value FROM settings WHERE key=?').get(KEY)?.value || null;
@@ -23,6 +47,9 @@ const clearSaved = () => db.prepare('DELETE FROM settings WHERE key=?').run(KEY)
 
 // ------------------------------------------------------------------ init
 function initMusic(client) {
+  // Cek versi library voice (boleh dihapus kalau sudah tidak perlu)
+  console.log(generateDependencyReport());
+
   let ffmpegPath = null;
   try {
     ffmpegPath = require('ffmpeg-static');
@@ -39,6 +66,8 @@ function initMusic(client) {
     // DisTube v5 tidak punya auto-leave, jadi bot memang tidak keluar sendiri (24/7).
     ...(ffmpegPath ? { ffmpeg: { path: ffmpegPath } } : {}),
   });
+
+  // Log debug DisTube (boleh dihapus kalau sudah normal)
   distube.on('debug', (msg) => console.log('[distube debug]', msg));
 
   distube
@@ -130,7 +159,9 @@ def(
     await i.deferReply();
     const query = i.options.getString('query', true);
     try {
-      await distube.play(vc, query, { member: i.member, textChannel: i.channel });
+      // Link langsung dipakai apa adanya, teks biasa dicari dulu lewat yt-dlp
+      const input = /^https?:\/\//i.test(query) ? query : await searchYoutube(query);
+      await distube.play(vc, input, { member: i.member, textChannel: i.channel });
       setSaved(vc.id);
       return i.editReply(`🔎 Mencari **${query.slice(0, 100)}**...`);
     } catch (err) {
