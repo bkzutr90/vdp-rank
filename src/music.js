@@ -1,5 +1,5 @@
 // Fitur musik (mirip Jockie Music) memakai Lavalink (lavalink-client).
-const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, MessageFlags, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const { LavalinkManager } = require('lavalink-client');
 const { db } = require('./db');
 
@@ -410,20 +410,70 @@ def(
 );
 
 // ------------------------------------------------------------------ info
-def(new SlashCommandBuilder().setName('queue').setDescription('Lihat antrean lagu'), async (i) => {
-  const p = playerOf(i);
+const QUEUE_PER_PAGE = 10;
+const clip = (str, n = 70) => (str.length > n ? `${str.slice(0, n - 1)}…` : str);
+
+// Susun isi satu halaman queue (dibaca langsung dari queue yang sedang berjalan).
+function queuePage(p, wanted) {
   const now = p?.queue.current;
-  if (!now) return i.reply({ content: '📭 Queue kosong.', flags: EPHEMERAL });
+  if (!now) return { payload: { content: '📭 Queue kosong.', embeds: [], components: [] }, page: 0, pages: 1 };
+
   const rest = p.queue.tracks;
-  const lines = rest.slice(0, 10).map((t, idx) => `**${idx + 2}.** ${t.info.title} \`${durOf(t)}\``);
-  const more = rest.length > 10 ? `\n… dan ${rest.length - 10} lagu lagi` : '';
+  const pages = Math.max(1, Math.ceil(rest.length / QUEUE_PER_PAGE));
+  const page = Math.min(Math.max(wanted, 0), pages - 1);
+  const start = page * QUEUE_PER_PAGE;
+  const lines = rest
+    .slice(start, start + QUEUE_PER_PAGE)
+    .map((t, idx) => `**${start + idx + 2}.** ${clip(t.info.title)} \`${durOf(t)}\``);
   const total = [now, ...rest].reduce((a, t) => a + (t.info.isStream ? 0 : t.info.duration || 0), 0);
+
   const e = new EmbedBuilder()
     .setColor(0xe74c3c)
     .setTitle('📃 Queue')
-    .setDescription(`**Sekarang:** [${now.info.title}](${now.info.uri}) \`${durOf(now)}\`\n\n${lines.join('\n') || '_Tidak ada lagu berikutnya_'}${more}`)
-    .setFooter({ text: `${rest.length + 1} lagu • ${fmt(total)} • Loop: ${LOOP_LABEL[p.repeatMode]}` });
-  return i.reply({ embeds: [e], allowedMentions: NO_PING });
+    .setDescription(`**Sekarang:** [${clip(now.info.title, 80)}](${now.info.uri}) \`${durOf(now)}\`\n\n${lines.join('\n') || '_Tidak ada lagu berikutnya_'}`)
+    .setFooter({ text: `Halaman ${page + 1}/${pages} • ${rest.length + 1} lagu • ${fmt(total)} • Loop: ${LOOP_LABEL[p.repeatMode]}` });
+
+  const btn = (id, emoji, disabled) => new ButtonBuilder().setCustomId(id).setEmoji(emoji).setStyle(ButtonStyle.Secondary).setDisabled(disabled);
+  const components =
+    pages > 1
+      ? [
+          new ActionRowBuilder().addComponents(
+            btn('mq_first', '⏮️', page === 0),
+            btn('mq_prev', '◀️', page === 0),
+            new ButtonBuilder().setCustomId('mq_page').setLabel(`${page + 1}/${pages}`).setStyle(ButtonStyle.Primary).setDisabled(true),
+            btn('mq_next', '▶️', page === pages - 1),
+            btn('mq_last', '⏭️', page === pages - 1)
+          ),
+        ]
+      : [];
+  return { payload: { embeds: [e], components }, page, pages };
+}
+
+def(new SlashCommandBuilder().setName('queue').setDescription('Lihat antrean lagu'), async (i) => {
+  const first = queuePage(playerOf(i), 0);
+  if (!playerOf(i)?.queue.current) return i.reply({ content: '📭 Queue kosong.', flags: EPHEMERAL });
+
+  await i.reply({ ...first.payload, allowedMentions: NO_PING });
+  if (first.pages <= 1) return;
+
+  let page = first.page;
+  const msg = await i.fetchReply();
+  const collector = msg.createMessageComponentCollector({ time: 120000 });
+
+  collector.on('collect', async (b) => {
+    if (b.user.id !== i.user.id) {
+      return b.reply({ content: 'Hanya yang menjalankan `/queue` yang bisa ganti halaman. Jalankan `/queue` sendiri ya.', flags: EPHEMERAL }).catch(() => {});
+    }
+    const target = { mq_first: 0, mq_prev: page - 1, mq_next: page + 1, mq_last: Infinity }[b.customId];
+    if (target === undefined) return;
+    const r = queuePage(playerOf(i), target);
+    page = r.page;
+    await b.update({ ...r.payload, allowedMentions: NO_PING }).catch(() => {});
+    if (!playerOf(i)?.queue.current) collector.stop();
+  });
+
+  // Setelah 2 menit tombol dihapus; jalankan /queue lagi untuk membuka ulang.
+  collector.on('end', () => i.editReply({ components: [] }).catch(() => {}));
 });
 
 def(new SlashCommandBuilder().setName('nowplaying').setDescription('Lagu yang sedang diputar'), async (i) => {
