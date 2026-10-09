@@ -1,6 +1,7 @@
 // Fitur musik (mirip Jockie Music) memakai DisTube + yt-dlp.
 // Mode 24/7: bot TIDAK keluar saat voice kosong / queue habis / stop. Satu-satunya cara keluar: /leave.
 // Channel voice terakhir disimpan di tabel settings, jadi bot masuk lagi otomatis setelah restart / ke-disconnect.
+const fs = require('fs');
 const path = require('path');
 const { execFile } = require('child_process');
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
@@ -17,6 +18,38 @@ let distube = null;
 
 // Lokasi binary yt-dlp bawaan @distube/yt-dlp (src/music.js -> ../node_modules/...)
 const YTDLP = path.join(__dirname, '..', 'node_modules', '@distube', 'yt-dlp', 'bin', 'yt-dlp');
+
+// @distube/yt-dlp masih mengirim opsi lama --no-call-home. yt-dlp terbaru mencetak "Deprecated Feature"
+// sehingga JSON.parse di plugin error dan bot crash. Solusi: bungkus binary dengan skrip yang membuang opsi itu.
+// Aman dijalankan berulang (idempotent), dipanggil tiap bot start.
+function patchYtDlp() {
+  try {
+    const dir = path.dirname(YTDLP);
+    const real = path.join(dir, 'yt-dlp.real');
+    if (!fs.existsSync(YTDLP)) return;
+
+    const isWrapper = fs.statSync(YTDLP).size < 4096; // binary asli berukuran MB, wrapper hanya beberapa baris
+    if (isWrapper && fs.existsSync(real)) return; // sudah dipatch
+
+    if (!isWrapper) fs.copyFileSync(YTDLP, real); // simpan binary asli
+    const wrapper = [
+      '#!/bin/sh',
+      'real="$(dirname "$0")/yt-dlp.real"',
+      'for a in "$@"; do',
+      '  shift',
+      '  if [ "$a" != "--no-call-home" ]; then set -- "$@" "$a"; fi',
+      'done',
+      'exec "$real" "$@"',
+      '',
+    ].join('\n');
+    fs.writeFileSync(YTDLP, wrapper);
+    fs.chmodSync(YTDLP, 0o755);
+    fs.chmodSync(real, 0o755);
+    console.log('[music] yt-dlp dipatch (opsi --no-call-home dibuang)');
+  } catch (err) {
+    console.warn('[music] gagal patch yt-dlp:', err.message);
+  }
+}
 
 // Cari lagu di YouTube lewat yt-dlp langsung, kembalikan URL video pertama.
 // Dipakai karena pencarian lewat plugin menghasilkan NO_RESULT tanpa pesan error asli.
@@ -50,6 +83,8 @@ function initMusic(client) {
   // Cek versi library voice (boleh dihapus kalau sudah tidak perlu)
   console.log(generateDependencyReport());
 
+  patchYtDlp(); // harus sebelum DisTube dibuat
+
   let ffmpegPath = null;
   try {
     ffmpegPath = require('ffmpeg-static');
@@ -59,7 +94,7 @@ function initMusic(client) {
   }
 
   distube = new DisTube(client, {
-    plugins: [new YtDlpPlugin({ update: true })],
+    plugins: [new YtDlpPlugin({ update: false })],
     emitNewSongOnly: true,
     savePreviousSongs: true,
     joinNewVoiceChannel: true,
