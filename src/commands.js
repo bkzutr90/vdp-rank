@@ -9,15 +9,17 @@ const {
 } = require('discord.js');
 const crypto = require('crypto');
 const cfg = require('./config');
-const { db, getSeason, setSeason, setFrozen, clearFrozen, isFrozen, nowSec } = require('./db');
+const { db, getSeason, setSeason, setFrozen, clearFrozen, isFrozen, nowSec, getStat, overall } = require('./db');
 const { lookupUser, getDescription, profileUrl } = require('./roblox');
-const { rankEmbed } = require('./embeds');
+const { rankEmbed, overallLabel } = require('./embeds');
 const { sendAdmin, freezeRow, isMod } = require('./matches');
+const { syncRank } = require('./roles');
 const party = require('./party');
 
 const EPHEMERAL = MessageFlags.Ephemeral;
 const MEDALS = ['🥇', '🥈', '🥉'];
 const WINDOWS = { weekly: 7, monthly: 30 };
+const MAX_MMR = 9999;
 const REPORT_CATEGORIES = [
   ['🚫 Cheating', 'Cheating'],
   ['🚫 Exploiting', 'Exploiting'],
@@ -27,6 +29,21 @@ const REPORT_CATEGORIES = [
   ['🚫 Match Manipulation', 'Match Manipulation'],
   ['🚫 Fake Result', 'Fake Result'],
 ];
+
+// Riwayat penyesuaian MMR manual (/adjust)
+db.exec(`
+CREATE TABLE IF NOT EXISTS mmr_adjustments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  discord_id TEXT NOT NULL,
+  season INTEGER NOT NULL,
+  role TEXT NOT NULL,
+  mmr_before INTEGER NOT NULL,
+  mmr_after INTEGER NOT NULL,
+  reason TEXT,
+  by TEXT NOT NULL,
+  created_at INTEGER DEFAULT (strftime('%s','now'))
+);
+`);
 
 const commands = new Map();
 const add = (data, execute) => commands.set(data.name, { data, execute });
@@ -332,6 +349,88 @@ add(
     return i.reply({
       content: was ? `✅ MMR <@${target.id}> dibuka kembali.` : `<@${target.id}> tidak sedang dibekukan.`,
       flags: EPHEMERAL,
+      allowedMentions: { parse: [] },
+    });
+  }
+);
+
+// ---------------------------------------------------------------- /adjust (admin)
+add(
+  new SlashCommandBuilder()
+    .setName('adjust')
+    .setDescription('Ubah MMR pemain secara manual (admin)')
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .addUserOption((o) => o.setName('player').setDescription('Pemain').setRequired(true))
+    .addStringOption((o) =>
+      o
+        .setName('role')
+        .setDescription('MMR role yang diubah')
+        .setRequired(true)
+        .addChoices({ name: '🔪 Killer', value: 'killer' }, { name: '🏃 Survivor', value: 'survivor' })
+    )
+    .addStringOption((o) =>
+      o
+        .setName('mode')
+        .setDescription('Cara mengubah')
+        .setRequired(true)
+        .addChoices(
+          { name: '🎯 Set (tentukan angka MMR)', value: 'set' },
+          { name: '➕ Tambah', value: 'add' },
+          { name: '➖ Kurangi', value: 'sub' }
+        )
+    )
+    .addIntegerOption((o) =>
+      o.setName('jumlah').setDescription('Angka MMR (untuk Set: MMR akhir)').setRequired(true).setMinValue(0).setMaxValue(MAX_MMR)
+    )
+    .addStringOption((o) => o.setName('alasan').setDescription('Alasan (tercatat di log admin)').setMaxLength(300)),
+  async (i) => {
+    if (!isMod(i)) return i.reply({ content: '❌ Hanya admin/mod.', flags: EPHEMERAL });
+    await i.deferReply({ flags: EPHEMERAL });
+
+    const target = i.options.getUser('player', true);
+    const role = i.options.getString('role', true);
+    const mode = i.options.getString('mode', true);
+    const amount = i.options.getInteger('jumlah', true);
+    const reason = i.options.getString('alasan') || '-';
+    const season = getSeason();
+
+    const stat = getStat(target.id, role, season);
+    const beforeOv = overall(target.id);
+    const old = stat.mmr;
+
+    let next = mode === 'set' ? amount : mode === 'add' ? old + amount : old - amount;
+    next = Math.max(0, Math.min(MAX_MMR, next));
+
+    db.transaction(() => {
+      db.prepare('UPDATE stats SET mmr=?, peak=MAX(peak,?) WHERE discord_id=? AND season=? AND role=?').run(next, next, target.id, season, role);
+      db.prepare(
+        'INSERT INTO mmr_adjustments (discord_id, season, role, mmr_before, mmr_after, reason, by) VALUES (?,?,?,?,?,?,?)'
+      ).run(target.id, season, role, old, next, reason, i.user.id);
+    })();
+
+    const afterOv = overall(target.id);
+    await syncRank(i.client, target.id, afterOv);
+
+    const diff = next - old;
+    const sign = diff >= 0 ? '+' : '';
+    const roleLabel = role === 'killer' ? '🔪 Killer' : '🏃 Survivor';
+    const rankChange =
+      overallLabel(beforeOv) !== overallLabel(afterOv) ? `\nRank: ${overallLabel(beforeOv)} ➜ ${overallLabel(afterOv)}` : '';
+
+    const embed = new EmbedBuilder()
+      .setColor(0x95a5a6)
+      .setTitle('🛠️ MMR ADJUSTMENT')
+      .addFields(
+        { name: 'Pemain', value: `<@${target.id}>`, inline: true },
+        { name: 'Role', value: roleLabel, inline: true },
+        { name: 'MMR', value: `${old} → **${next}** (${sign}${diff})`, inline: true },
+        { name: 'Oleh', value: `<@${i.user.id}>`, inline: true },
+        { name: 'Alasan', value: reason }
+      );
+    await sendAdmin(i.client, { embeds: [embed], allowedMentions: { parse: [] } });
+
+    return i.editReply({
+      content: `✅ MMR ${roleLabel} <@${target.id}>: ${old} → **${next}** (${sign}${diff})${rankChange}`,
       allowedMentions: { parse: [] },
     });
   }
