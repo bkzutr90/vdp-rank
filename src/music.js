@@ -51,6 +51,15 @@ async function doAutoplay(player) {
   return true;
 }
 
+// Hapus semua player setelah node Lavalink putus & tersambung lagi, lalu masuk ulang ke voice 24/7.
+async function resetStalePlayers() {
+  for (const p of [...lava.players.values()]) {
+    if (p.queue.current) sendText(p, '⚠️ Koneksi ke Lavalink sempat putus, queue direset. Silakan `/play` lagi.');
+    await p.destroy('node reconnect').catch(() => {});
+  }
+  await restoreMusic(discord);
+}
+
 // ------------------------------------------------------------------ init
 function initMusic(client) {
   discord = client;
@@ -87,9 +96,20 @@ function initMusic(client) {
     } catch {}
   });
 
+  let nodeWasDown = false;
   lava.nodeManager
-    .on('connect', (node) => console.log(`[music] Lavalink node "${node.id}" terhubung`))
-    .on('disconnect', (node, reason) => console.warn(`[music] node "${node.id}" putus:`, reason?.reason || reason))
+    .on('connect', (node) => {
+      console.log(`[music] Lavalink node "${node.id}" terhubung`);
+      // Node hidup lagi setelah putus: player lama sudah hilang di sisi Lavalink, jadi reset supaya tidak "zombie".
+      if (nodeWasDown) {
+        nodeWasDown = false;
+        resetStalePlayers().catch((err) => console.warn('[music] reset player gagal:', err.message));
+      }
+    })
+    .on('disconnect', (node, reason) => {
+      nodeWasDown = true;
+      console.warn(`[music] node "${node.id}" putus:`, reason?.reason || reason);
+    })
     .on('error', (node, err) => console.error(`[music] node "${node.id}" error:`, err?.message || err));
 
   lava
