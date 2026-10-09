@@ -153,6 +153,10 @@ function initMusic(client) {
       queue?.textChannel?.send(`❌ Gagal memutar: \`${String(err.message || err).slice(0, 200)}\``).catch(() => {});
     });
 
+  distube.on('finish', (queue) => {
+    console.log('[music] queue selesai (bisa karena stream putus, cek log ffmpeg di atas)');
+  });
+  
   // Backstop 24/7: kalau bot ke-disconnect, masuk lagi. Kalau dipindah admin, ikuti channel barunya.
   client.on('voiceStateUpdate', (oldS, newS) => {
     if (newS.member?.id !== client.user.id) return;
