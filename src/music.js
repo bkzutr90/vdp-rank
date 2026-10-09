@@ -34,10 +34,7 @@ function initMusic(client) {
     emitNewSongOnly: true,
     savePreviousSongs: true,
     joinNewVoiceChannel: true,
-    // 24/7: jangan pernah keluar sendiri
-    leaveOnEmpty: false,
-    leaveOnFinish: false,
-    leaveOnStop: false,
+    // DisTube v5 tidak punya auto-leave, jadi bot memang tidak keluar sendiri (24/7).
     ...(ffmpegPath ? { ffmpeg: { path: ffmpegPath } } : {}),
   });
 
