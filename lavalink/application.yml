@@ -39,13 +39,12 @@ plugins:
     remoteCipher:
       url: "https://cipher.kikkia.dev/"
       userAgent: "vdp-ranked"
-    # Login OAuth supaya YouTube tidak memblokir IP datacenter.
-    # LANGKAH 1: biarkan seperti ini, redeploy, lalu buka log lavalink -> ikuti link google.com/device + kode.
-    # LANGKAH 2: setelah login, log menampilkan refresh token. Tambahkan 2 baris di bawah "enabled: true":
-    #     refreshToken: "TOKEN_DARI_LOG"
-    #     skipInitialization: true
+    # Login OAuth (akun Google cadangan). Token dibaca dari variabel YOUTUBE_REFRESH_TOKEN di Railway
+    # (service lavalink), jadi tidak ikut tersimpan di GitHub.
     oauth:
       enabled: true
+      refreshToken: "${YOUTUBE_REFRESH_TOKEN}"
+      skipInitialization: true
 logging:
   level:
     root: INFO
