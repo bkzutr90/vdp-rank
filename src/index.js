@@ -19,7 +19,11 @@ async function registerCommands(clientId) {
     const body = [...commands.values()].map((c) => c.data.toJSON());
     const rest = new REST({ version: '10' }).setToken(cfg.token);
     await rest.put(Routes.applicationGuildCommands(clientId, cfg.guildId), { body });
-    console.log(`✅ ${body.length} slash command terdaftar di server ${cfg.guildId}`);
+
+    // Baca balik dari Discord untuk memastikan command benar-benar tersimpan
+    const live = await rest.get(Routes.applicationGuildCommands(clientId, cfg.guildId));
+    console.log(`✅ ${body.length} command dikirim, ${live.length} aktif di server ${cfg.guildId}:`);
+    console.log(live.map((c) => c.name).sort().join(', '));
   } catch (err) {
     console.error('[register] gagal daftar command:', err);
   }
