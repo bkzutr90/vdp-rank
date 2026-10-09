@@ -10,9 +10,12 @@
 //   YTDLP_REMOTE_COMPONENTS=1   -> yt-dlp mengunduh komponen JS challenge (ejs) dari GitHub tiap panggilan.
 //                                  Hanya nyalakan kalau yt-dlp kamu butuh dan koneksi ke GitHub lancar.
 //   PLAY_TIMEOUT_MS=45000       -> batas waktu /play sebelum dibatalkan
+//   MIX_LIMIT=25                -> jumlah lagu yang diambil dari link YouTube Mix (list=RD...)
+//   YTDLP_PROXY=0               -> matikan proxy stream lokal (kembali ke ffmpeg langsung ke URL googlevideo)
 const fs = require('fs');
 const path = require('path');
-const { execFile } = require('child_process');
+const http = require('http');
+const { execFile, spawn } = require('child_process');
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 const { DisTube } = require('distube');
 const { YtDlpPlugin } = require('@distube/yt-dlp');
@@ -32,6 +35,7 @@ const NO_PING = { parse: [] };
 const KEY = 'music_vc';
 const PLAY_TIMEOUT_MS = Number(process.env.PLAY_TIMEOUT_MS) || 45000;
 const REMOTE_COMPONENTS = process.env.YTDLP_REMOTE_COMPONENTS === '1';
+const MIX_LIMIT = Number(process.env.MIX_LIMIT) || 25; // maksimal lagu yang diambil dari YouTube Mix
 
 // 'native' (default) atau 'ytdlp'
 const USE_NATIVE = YouTubePlugin && (process.env.MUSIC_ENGINE || 'native').toLowerCase() !== 'ytdlp';
@@ -126,6 +130,97 @@ function searchYoutube(query) {
   });
 }
 
+// ------------------------------------------------------------------ proxy stream lokal (anti putus / throttle)
+// Masalah: ffmpeg membuka URL googlevideo langsung dengan SATU request panjang. YouTube men-throttle lalu memutus
+// request seperti itu (log: speed turun ke 1x, lalu "Premature close"), terutama untuk file besar (lagu panjang).
+// Solusi: yt-dlp yang mengunduh (ia memakai request berpotongan/chunked + retry, jadi tidak diputus), hasilnya
+// dialirkan lewat server HTTP lokal 127.0.0.1 ke ffmpeg. Hanya dipakai di engine yt-dlp.
+const YT_ID = /^[\w-]{11}$/;
+const ytIdFromUrl = (url) => {
+  try {
+    const u = new URL(url);
+    const id = u.hostname === 'youtu.be' ? u.pathname.slice(1) : u.searchParams.get('v');
+    return id && YT_ID.test(id) ? id : null;
+  } catch {
+    return null;
+  }
+};
+
+let proxyPort = 0;
+function startStreamProxy() {
+  if (process.env.YTDLP_PROXY === '0') return;
+  const server = http.createServer((req, res) => {
+    const m = /^\/s\/([\w-]{11})$/.exec(req.url || '');
+    if (!m) {
+      res.writeHead(404);
+      return res.end();
+    }
+    const id = m[1];
+    const child = spawn(
+      YTDLP,
+      ['-f', 'bestaudio[ext=webm]/bestaudio', '--no-playlist', '--no-warnings', '--quiet', '--retries', '10', '-o', '-', `https://www.youtube.com/watch?v=${id}`],
+      { stdio: ['ignore', 'pipe', 'pipe'] }
+    );
+    console.log(`[music] proxy: mulai stream ${id}`);
+    res.writeHead(200, { 'Content-Type': 'application/octet-stream' });
+    child.stdout.pipe(res);
+    child.stderr.on('data', (d) => console.warn('[music] proxy yt-dlp:', String(d).trim().slice(0, 300)));
+    child.on('error', (err) => {
+      console.error('[music] proxy spawn gagal:', err.message);
+      res.destroy();
+    });
+    child.on('close', (code) => {
+      console.log(`[music] proxy: yt-dlp selesai ${id} (code=${code})`);
+      res.end();
+    });
+    res.on('close', () => child.kill('SIGKILL')); // ffmpeg berhenti / skip -> hentikan unduhan
+  });
+  server.on('error', (err) => console.warn('[music] proxy gagal start:', err.message));
+  server.listen(0, '127.0.0.1', () => {
+    proxyPort = server.address().port;
+    console.log(`[music] proxy stream aktif di 127.0.0.1:${proxyPort}`);
+  });
+  server.unref();
+}
+
+// Plugin yt-dlp yang mengarahkan stream YouTube lewat proxy lokal di atas.
+class ProxyYtDlpPlugin extends YtDlpPlugin {
+  async getStreamURL(song) {
+    const id = ytIdFromUrl(song.url);
+    if (id && proxyPort) return `http://127.0.0.1:${proxyPort}/s/${id}`;
+    return super.getStreamURL(song);
+  }
+}
+
+// ------------------------------------------------------------------ YouTube Mix (list=RD...)
+const isMixUrl = (input) => {
+  try {
+    const u = new URL(input);
+    return !!u.searchParams.get('v') && (u.searchParams.get('list') || '').startsWith('RD');
+  } catch {
+    return false;
+  }
+};
+
+// Ambil daftar id video dari Mix lewat yt-dlp (flat, dibatasi MIX_LIMIT supaya tidak tak terbatas).
+function fetchMixIds(url, limit = MIX_LIMIT) {
+  return new Promise((resolve, reject) => {
+    execFile(
+      YTDLP,
+      ['--flat-playlist', '--playlist-end', String(limit), '--no-warnings', '--print', 'id', url],
+      { timeout: 40000 },
+      (err, stdout, stderr) => {
+        if (err) return reject(new Error((stderr || err.message).trim().split('\n').pop()));
+        const ids = [...new Set(stdout.split('\n').map((x) => x.trim()).filter((x) => YT_ID.test(x)))];
+        resolve(ids);
+      }
+    );
+  });
+}
+
+// Guild yang sedang memuat Mix: pesan "masuk queue" per lagu disembunyikan (diganti 1 ringkasan).
+const quietGuilds = new Set();
+
 // ------------------------------------------------------------------ simpan channel 24/7
 const getSaved = () => db.prepare('SELECT value FROM settings WHERE key=?').get(KEY)?.value || null;
 const setSaved = (id) =>
@@ -141,9 +236,10 @@ function initMusic(client) {
   console.log(generateDependencyReport());
 
   patchYtDlp(); // harus sebelum DisTube dibuat (yt-dlp tetap jadi cadangan / untuk situs selain YouTube)
+  startStreamProxy();
 
   // Urutan plugin penting: plugin pertama yang cocok dengan input yang dipakai.
-  const plugins = USE_NATIVE ? [new YouTubePlugin(), new YtDlpPlugin({ update: false })] : [new YtDlpPlugin({ update: false })];
+  const plugins = USE_NATIVE ? [new YouTubePlugin(), new ProxyYtDlpPlugin({ update: false })] : [new ProxyYtDlpPlugin({ update: false })];
   console.log(`[music] engine: ${USE_NATIVE ? 'native (@distube/youtube) + yt-dlp cadangan' : 'yt-dlp'}`);
 
   distube = new DisTube(client, {
@@ -165,7 +261,7 @@ function initMusic(client) {
 
   distube
     .on('playSong', (queue, song) => {
-      playStartedAt.set(queue.id, Date.now());
+      playStartedAt.set(queue.id, { t: Date.now(), duration: song.duration, live: song.isLive });
       const e = new EmbedBuilder()
         .setColor(0xe74c3c)
         .setTitle('🎶 Sedang diputar')
@@ -179,6 +275,7 @@ function initMusic(client) {
       queue.textChannel?.send({ embeds: [e], allowedMentions: NO_PING }).catch(() => {});
     })
     .on('addSong', (queue, song) => {
+      if (quietGuilds.has(queue.id)) return;
       queue.textChannel
         ?.send({ content: `➕ **${song.name}** (${song.formattedDuration}) masuk queue — oleh ${song.user}`, allowedMentions: NO_PING })
         .catch(() => {});
@@ -190,13 +287,12 @@ function initMusic(client) {
     })
     .on('finish', (queue) => {
       // Diagnosa: kalau lagu selesai jauh lebih cepat dari durasinya, berarti stream putus (bukan selesai normal).
-      const started = playStartedAt.get(queue.id);
+      const info = playStartedAt.get(queue.id);
       playStartedAt.delete(queue.id);
-      const song = queue.songs?.[0];
-      if (started && song?.duration) {
-        const elapsed = Math.round((Date.now() - started) / 1000);
-        const tag = elapsed < song.duration * 0.9 ? 'KEMUNGKINAN STREAM PUTUS' : 'selesai normal';
-        console.log(`[music] finish: diputar ${elapsed}s dari ${song.duration}s -> ${tag}`);
+      if (info?.duration && !info.live) {
+        const elapsed = Math.round((Date.now() - info.t) / 1000);
+        const tag = elapsed < info.duration * 0.9 ? 'KEMUNGKINAN STREAM PUTUS' : 'selesai normal';
+        console.log(`[music] finish: diputar ${elapsed}s dari ${info.duration}s -> ${tag}`);
       } else {
         console.log('[music] queue selesai');
       }
@@ -254,6 +350,26 @@ async function needQueue(i) {
   return q;
 }
 
+// Muat sisa lagu Mix satu per satu di background (berhenti kalau queue sudah dihentikan).
+async function loadMixRest(vc, urls, opts, guildId) {
+  quietGuilds.add(guildId);
+  let added = 0;
+  try {
+    for (const url of urls) {
+      if (!distube.getQueue(guildId)) break; // /stop atau /leave dipanggil
+      try {
+        await withTimeout(distube.play(vc, url, opts), PLAY_TIMEOUT_MS);
+        added++;
+      } catch (err) {
+        console.warn('[music] lagu Mix dilewati:', String(err.message || err).slice(0, 150));
+      }
+    }
+  } finally {
+    quietGuilds.delete(guildId);
+  }
+  opts.textChannel?.send({ content: `📃 Mix selesai dimuat: **${added + 1}** lagu masuk queue.`, allowedMentions: NO_PING }).catch(() => {});
+}
+
 // ------------------------------------------------------------------ /play
 def(
   new SlashCommandBuilder()
@@ -266,12 +382,32 @@ def(
     await i.deferReply();
     const query = i.options.getString('query', true).trim();
     try {
-      let input = cleanUrl(query); // buang list=RD... (YouTube Mix) kalau ada
+      const opts = { member: i.member, textChannel: i.channel };
+
+      // Link YouTube Mix (list=RD...): ambil daftar lagunya, putar yang pertama dulu, sisanya dimuat di background.
+      if (isMixUrl(query)) {
+        let ids = [];
+        try {
+          ids = await fetchMixIds(query);
+        } catch (err) {
+          console.warn('[music] gagal ambil Mix, putar satu lagu saja:', err.message);
+        }
+        if (ids.length > 1) {
+          const watch = (id) => `https://www.youtube.com/watch?v=${id}`;
+          await withTimeout(distube.play(vc, watch(ids[0]), opts), PLAY_TIMEOUT_MS);
+          setSaved(vc.id);
+          await i.editReply(`📻 Mix ditemukan: memuat **${ids.length}** lagu ke queue...`);
+          loadMixRest(vc, ids.slice(1).map(watch), opts, i.guildId); // tidak di-await
+          return;
+        }
+      }
+
+      let input = cleanUrl(query); // Mix gagal diambil -> buang list=RD... dan putar satu lagu
       if (!USE_NATIVE && !/^https?:\/\//i.test(query)) {
         // Mode yt-dlp: teks biasa dicari dulu lewat yt-dlp. Mode native: plugin mencari sendiri.
         input = await searchYoutube(query);
       }
-      await withTimeout(distube.play(vc, input, { member: i.member, textChannel: i.channel }), PLAY_TIMEOUT_MS);
+      await withTimeout(distube.play(vc, input, opts), PLAY_TIMEOUT_MS);
       setSaved(vc.id);
       return i.editReply(`🔎 Mencari **${query.slice(0, 100)}**...`);
     } catch (err) {
