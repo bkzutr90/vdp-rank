@@ -9,7 +9,7 @@ lavalink:
     - dependency: "dev.lavalink.youtube:youtube-plugin:f45bbb7aebfcbc1c553769e04af6cd43afa8b7c3"
       snapshot: true
   server:
-    password: "GANTI_PASSWORD_KAMU"   # samakan dengan LAVALINK_PASSWORD di bot
+    password: "bkzutr9090"   # samakan dengan LAVALINK_PASSWORD di bot
     sources:
       youtube: false              # dimatikan, diganti plugin youtube-source
       bandcamp: true
