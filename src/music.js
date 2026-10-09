@@ -42,10 +42,6 @@ function patchYtDlp() {
     const real = path.join(dir, 'yt-dlp.real');
     if (!fs.existsSync(YTDLP)) return;
 
-    const isWrapper = fs.statSync(YTDLP).size < 4096; // binary asli berukuran MB, wrapper hanya beberapa baris
-    if (isWrapper && fs.existsSync(real)) return; // sudah dipatch
-
-    if (!isWrapper) fs.copyFileSync(YTDLP, real); // simpan binary asli
     const wrapper = [
       '#!/bin/sh',
       'real="$(dirname "$0")/yt-dlp.real"',
@@ -53,13 +49,21 @@ function patchYtDlp() {
       '  shift',
       '  if [ "$a" != "--no-call-home" ]; then set -- "$@" "$a"; fi',
       'done',
-      'exec "$real" "$@"',
+      'exec "$real" --js-runtimes node "$@"',
       '',
     ].join('\n');
+
+    const isWrapper = fs.statSync(YTDLP).size < 4096; // binary asli berukuran MB
+    if (!isWrapper) fs.copyFileSync(YTDLP, real); // simpan binary asli
+    if (!fs.existsSync(real)) return;
+
+    // Tulis ulang hanya kalau isi wrapper berbeda (aman dipanggil tiap start)
+    if (isWrapper && fs.readFileSync(YTDLP, 'utf8') === wrapper) return;
+
     fs.writeFileSync(YTDLP, wrapper);
     fs.chmodSync(YTDLP, 0o755);
     fs.chmodSync(real, 0o755);
-    console.log('[music] yt-dlp dipatch (opsi --no-call-home dibuang)');
+    console.log('[music] yt-dlp dipatch (--no-call-home dibuang, JS runtime node aktif)');
   } catch (err) {
     console.warn('[music] gagal patch yt-dlp:', err.message);
   }
