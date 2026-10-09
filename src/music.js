@@ -81,7 +81,7 @@ function initMusic(client) {
     // id sementara; diisi id bot yang asli saat lava.init() di ensureLavalink()
     client: { id: process.env.CLIENT_ID || '0', username: 'VDP Ranked' },
     playerOptions: {
-      defaultSearchPlatform: 'ytsearch',
+      defaultSearchPlatform: process.env.MUSIC_SEARCH || 'ytsearch', // 'scsearch' = SoundCloud
       volumeDecrementer: 1,
       clientBasedPositionUpdateInterval: 150,
       onDisconnect: { autoReconnect: true, destroyPlayer: false },
