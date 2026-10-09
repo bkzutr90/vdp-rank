@@ -460,7 +460,7 @@ add(
   new SlashCommandBuilder()
     .setName('cleanup-lobbies')
     .setDescription('Hapus channel match-xxxxxx yang yatim (tidak terkait match aktif)')
-    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
     .addBooleanOption((o) =>
       o
         .setName('reset_matches')
