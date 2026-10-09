@@ -7,11 +7,18 @@ const {
 const cfg = require('./config');
 const { db, matchTag, nowSec, getSeason, overall, isFrozen, removeFromQueue } = require('./db');
 const { profileUrl } = require('./roblox');
-const { resultButtons } = require('./matches');
+const { resultButtons, sendAdmin } = require('./matches');
 const { rankPayload } = require('./embeds');
 const { getPartyOf, members, isPartyQueued } = require('./party');
 
 let running = false;
+
+// Kalau pembuatan lobby gagal (izin bot kurang, kategori penuh, dll.), matchmaking dijeda
+// dan tidak mengulang terus-menerus. Jeda memanjang tiap gagal berturut-turut (maks 10 menit).
+let pausedUntil = 0;
+let failStreak = 0;
+const PAUSE_BASE_MS = 60 * 1000;
+const PAUSE_MAX_MS = 10 * 60 * 1000;
 
 // Berapa banyak "match sejak terakhir jadi Killer" yang dihitung sebagai bobot (maks).
 // Makin lama tidak jadi Killer, makin besar peluang kepilih, tapi tetap acak.
@@ -138,6 +145,7 @@ async function createMatch(client, killer, survivors) {
     return id;
   })();
 
+  let channel = null;
   try {
     const guild = await client.guilds.fetch(cfg.guildId);
     const allow = [
@@ -148,11 +156,16 @@ async function createMatch(client, killer, survivors) {
     ];
     const overwrites = [
       { id: guild.id, deny: [PermissionFlagsBits.ViewChannel] },
+      // Bot harus punya akses eksplisit, karena deny @everyone juga mencabut akses lihat channel dari bot
+      {
+        id: client.user.id,
+        allow: [...allow, PermissionFlagsBits.EmbedLinks, PermissionFlagsBits.ManageChannels],
+      },
       ...ids.map((id) => ({ id, allow })),
     ];
     if (cfg.modRoleId) overwrites.push({ id: cfg.modRoleId, allow });
 
-    const channel = await guild.channels.create({
+    channel = await guild.channels.create({
       name: `match-${String(matchId).padStart(6, '0')}`,
       type: ChannelType.GuildText,
       parent: cfg.categoryId || undefined,
@@ -194,20 +207,43 @@ async function createMatch(client, killer, survivors) {
     });
   } catch (err) {
     console.error('[matchmaking] gagal bikin lobby, match di-void & pemain dikembalikan ke queue:', err);
-    db.prepare("UPDATE matches SET status='void' WHERE id=?").run(matchId);
+    // Hapus channel setengah jadi supaya tidak menumpuk
+    if (channel) await channel.delete('Gagal membuat lobby').catch(() => {});
+    db.prepare("UPDATE matches SET status='void', channel_id=NULL, finished_at=strftime('%s','now') WHERE id=?").run(matchId);
     const re = db.prepare('INSERT OR REPLACE INTO queue (discord_id, role, party_id, joined_at) VALUES (?,?,?,?)');
     all.forEach((p) => re.run(p.discord_id, p.role, p.party_id || null, p.joined_at));
+    return { ok: false, error: err };
   }
+  return { ok: true };
 }
 
 async function runMatchmaking(client) {
   if (running) return;
+  if (Date.now() < pausedUntil) return;
   running = true;
   try {
     for (;;) {
       const found = findMatch();
       if (!found) break;
-      await createMatch(client, found.killer, found.survivors);
+
+      const res = await createMatch(client, found.killer, found.survivors);
+      if (res.ok) {
+        failStreak = 0;
+        continue;
+      }
+
+      // Gagal: berhenti, jeda, dan kabari admin (jangan diulang terus)
+      failStreak += 1;
+      const pauseMs = Math.min(PAUSE_BASE_MS * failStreak, PAUSE_MAX_MS);
+      pausedUntil = Date.now() + pauseMs;
+      await sendAdmin(client, {
+        content:
+          `⚠️ **Gagal membuat lobby match.** Matchmaking dijeda ${Math.round(pauseMs / 1000)} detik ` +
+          `(gagal berturut-turut: ${failStreak}).\n` +
+          `Error: \`${String(res.error?.message || res.error).slice(0, 300)}\`\n` +
+          'Cek izin bot (Manage Channels, Manage Roles, View Channels) dan jumlah channel di kategori match (maks. 50).',
+      });
+      break;
     }
   } catch (err) {
     console.error('[matchmaking] error:', err);
