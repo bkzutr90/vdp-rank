@@ -1,6 +1,9 @@
-// Fitur musik (mirip Jockie Music) memakai DisTube + yt-dlp.
+// Fitur musik (mirip Jockie Music) memakai DisTube.
+// Engine utama: @distube/youtube (native, tanpa spawn proses => cepat). Cadangan: yt-dlp.
+// Ganti engine lewat env var MUSIC_ENGINE=ytdlp (kembali ke setup lama) tanpa ubah kode.
 // Mode 24/7: bot TIDAK keluar saat voice kosong / queue habis / stop. Satu-satunya cara keluar: /leave.
 // Channel voice terakhir disimpan di tabel settings, jadi bot masuk lagi otomatis setelah restart / ke-disconnect.
+// FFmpeg: memakai ffmpeg sistem (PATH). ffmpeg-static dibuang karena crash SIGSEGV di container Railway.
 const fs = require('fs');
 const path = require('path');
 const { execFile } = require('child_process');
@@ -10,9 +13,20 @@ const { YtDlpPlugin } = require('@distube/yt-dlp');
 const { generateDependencyReport } = require('@discordjs/voice');
 const { db } = require('./db');
 
+// Plugin YouTube native: dimuat aman, kalau belum di-install bot tetap jalan dengan yt-dlp
+let YouTubePlugin = null;
+try {
+  ({ YouTubePlugin } = require('@distube/youtube'));
+} catch {
+  console.warn('[music] @distube/youtube belum terpasang, pakai yt-dlp saja (npm install @distube/youtube)');
+}
+
 const EPHEMERAL = MessageFlags.Ephemeral;
 const NO_PING = { parse: [] };
 const KEY = 'music_vc';
+
+// 'native' (default) atau 'ytdlp'
+const USE_NATIVE = YouTubePlugin && (process.env.MUSIC_ENGINE || 'native').toLowerCase() !== 'ytdlp';
 
 let distube = null;
 
@@ -52,7 +66,7 @@ function patchYtDlp() {
 }
 
 // Cari lagu di YouTube lewat yt-dlp langsung, kembalikan URL video pertama.
-// Dipakai karena pencarian lewat plugin menghasilkan NO_RESULT tanpa pesan error asli.
+// Hanya dipakai di mode MUSIC_ENGINE=ytdlp (mode native mencari sendiri lewat plugin).
 function searchYoutube(query) {
   return new Promise((resolve, reject) => {
     execFile(
@@ -83,27 +97,24 @@ function initMusic(client) {
   // Cek versi library voice (boleh dihapus kalau sudah tidak perlu)
   console.log(generateDependencyReport());
 
-  patchYtDlp(); // harus sebelum DisTube dibuat
+  patchYtDlp(); // harus sebelum DisTube dibuat (yt-dlp tetap jadi cadangan / untuk situs selain YouTube)
 
-  let ffmpegPath = null;
-  try {
-    ffmpegPath = require('ffmpeg-static');
-    process.env.PATH = path.dirname(ffmpegPath) + path.delimiter + process.env.PATH;
-  } catch {
-    /* pakai ffmpeg dari sistem */
-  }
+  // Urutan plugin penting: plugin pertama yang cocok dengan input yang dipakai.
+  const plugins = USE_NATIVE ? [new YouTubePlugin(), new YtDlpPlugin({ update: false })] : [new YtDlpPlugin({ update: false })];
+  console.log(`[music] engine: ${USE_NATIVE ? 'native (@distube/youtube) + yt-dlp cadangan' : 'yt-dlp'}`);
 
   distube = new DisTube(client, {
-    plugins: [new YtDlpPlugin({ update: false })],
+    plugins,
     emitNewSongOnly: true,
     savePreviousSongs: true,
     joinNewVoiceChannel: true,
+    // DisTube v5 tidak punya auto-leave, jadi bot memang tidak keluar sendiri (24/7).
+    // FFmpeg diambil dari PATH sistem.
   });
 
   // Log debug DisTube (boleh dihapus kalau sudah normal)
   distube.on('debug', (msg) => console.log('[distube debug]', msg));
-
-  distube.on('ffmpegDebug', (msg) => console.log('[ffmpeg]', msg));
+  distube.on('ffmpegDebug', (msg) => console.log('[ffmpeg]', String(msg).slice(0, 300)));
 
   distube
     .on('playSong', (queue, song) => {
@@ -194,8 +205,11 @@ def(
     await i.deferReply();
     const query = i.options.getString('query', true);
     try {
-      // Link langsung dipakai apa adanya, teks biasa dicari dulu lewat yt-dlp
-      const input = /^https?:\/\//i.test(query) ? query : await searchYoutube(query);
+      let input = query;
+      if (!USE_NATIVE && !/^https?:\/\//i.test(query)) {
+        // Mode yt-dlp: teks biasa dicari dulu lewat yt-dlp. Mode native: plugin mencari sendiri.
+        input = await searchYoutube(query);
+      }
       await distube.play(vc, input, { member: i.member, textChannel: i.channel });
       setSaved(vc.id);
       return i.editReply(`🔎 Mencari **${query.slice(0, 100)}**...`);
