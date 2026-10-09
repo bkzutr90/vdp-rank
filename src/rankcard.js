@@ -1,10 +1,14 @@
 // Kartu gambar Rank Up (PNG) memakai @napi-rs/canvas.
-// Kalau library/font gagal dimuat, fungsi mengembalikan null dan bot tetap jalan tanpa gambar.
+// Emblem tier diambil dari assets/emblems/<nama-tier>.png (mis. rookie.png, apex-predator.png).
+// Kalau library/font/emblem gagal dimuat, kartu tetap dibuat dengan emblem heksagon sederhana,
+// dan kalau library canvas sendiri gagal, fungsi mengembalikan null (bot tetap jalan tanpa gambar).
 const path = require('path');
 const fs = require('fs');
 
 let lib = null; // null = belum dicoba, false = gagal
 const FONT = 'VDPFont';
+const EMBLEM_DIR = path.join(__dirname, '..', 'assets', 'emblems');
+const emblemCache = new Map(); // slug -> Image
 
 function load() {
   if (lib !== null) return lib;
@@ -18,6 +22,27 @@ function load() {
   }
   return lib;
 }
+
+const slugOf = (tierName) => tierName.toLowerCase().replace(/\s+/g, '-');
+
+// Muat semua emblem sekali di awal (async), lalu dipakai dari cache saat render.
+// Kalau render terjadi sebelum selesai dimuat, kartu memakai emblem heksagon cadangan.
+function preloadEmblems(L) {
+  let files = [];
+  try {
+    files = fs.readdirSync(EMBLEM_DIR).filter((f) => f.endsWith('.png'));
+  } catch (err) {
+    console.warn(`[rankcard] folder emblem tidak ditemukan (${EMBLEM_DIR}), pakai emblem cadangan`);
+    return;
+  }
+  for (const f of files) {
+    L.loadImage(path.join(EMBLEM_DIR, f))
+      .then((img) => emblemCache.set(f.replace(/\.png$/, ''), img))
+      .catch((err) => console.warn(`[rankcard] gagal memuat emblem ${f}:`, err.message));
+  }
+}
+
+const getEmblem = (tierName) => emblemCache.get(slugOf(tierName)) || null;
 
 function rgb(hex) {
   const n = parseInt(hex.replace('#', ''), 16);
@@ -40,6 +65,28 @@ function hexagon(ctx, cx, cy, r) {
   ctx.closePath();
 }
 
+// Emblem cadangan (heksagon + 2 huruf) kalau file gambar emblem tidak ada
+function drawFallbackEmblem(ctx, font, o, cx, cy) {
+  const col = o.tier.color;
+  hexagon(ctx, cx, cy, 70);
+  ctx.fillStyle = rgba(col, 0.25);
+  ctx.fill();
+  ctx.strokeStyle = col;
+  ctx.lineWidth = 5;
+  ctx.stroke();
+  hexagon(ctx, cx, cy, 50);
+  ctx.strokeStyle = rgba(col, 0.6);
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  const parts = o.tier.name.split(' ');
+  const glyph = (parts.length > 1 ? parts.map((w) => w[0]).join('') : o.tier.name.slice(0, 2)).toUpperCase();
+  ctx.fillStyle = '#ffffff';
+  ctx.font = font(44);
+  ctx.textAlign = 'center';
+  ctx.fillText(glyph, cx, cy + 16);
+}
+
 /**
  * @param {{name:string, tier:{name:string,color:string}, division:string, fromMmr:number|null, toMmr:number, kind:'rankup'|'placement'}} o
  * @returns {Buffer|null} PNG
@@ -49,7 +96,9 @@ function renderRankCard(o) {
   if (!L) return null;
   try {
     const W = 900;
-    const H = 420;
+    const H = 500;
+    const EMBLEM_CY = 190;
+    const EMBLEM_SIZE = 230;
     const canvas = L.createCanvas(W, H);
     const ctx = canvas.getContext('2d');
     const col = o.tier.color;
@@ -63,8 +112,8 @@ function renderRankCard(o) {
     ctx.fillRect(0, 0, W, H);
 
     // Glow di belakang emblem
-    const glow = ctx.createRadialGradient(W / 2, 150, 10, W / 2, 150, 260);
-    glow.addColorStop(0, rgba(col, 0.55));
+    const glow = ctx.createRadialGradient(W / 2, EMBLEM_CY, 10, W / 2, EMBLEM_CY, 290);
+    glow.addColorStop(0, rgba(col, 0.5));
     glow.addColorStop(1, rgba(col, 0));
     ctx.fillStyle = glow;
     ctx.fillRect(0, 0, W, H);
@@ -90,41 +139,33 @@ function renderRankCard(o) {
     // Judul
     ctx.fillStyle = col;
     ctx.font = font(38);
-    ctx.fillText(o.kind === 'placement' ? 'PLACEMENT COMPLETE' : 'RANK UP', W / 2, 70);
+    ctx.fillText(o.kind === 'placement' ? 'PLACEMENT COMPLETE' : 'RANK UP', W / 2, 62);
 
-    // Emblem heksagon + huruf tier
-    hexagon(ctx, W / 2, 150, 62);
-    ctx.fillStyle = rgba(col, 0.25);
-    ctx.fill();
-    ctx.strokeStyle = col;
-    ctx.lineWidth = 5;
-    ctx.stroke();
-    hexagon(ctx, W / 2, 150, 44);
-    ctx.strokeStyle = rgba(col, 0.6);
-    ctx.lineWidth = 2;
-    ctx.stroke();
-    const parts = o.tier.name.split(' ');
-    const glyph = (parts.length > 1 ? parts.map((w) => w[0]).join('') : o.tier.name.slice(0, 2)).toUpperCase();
-    ctx.fillStyle = '#ffffff';
-    ctx.font = font(40);
-    ctx.fillText(glyph, W / 2, 164);
+    // Emblem tier
+    const emblem = getEmblem(o.tier.name);
+    if (emblem) {
+      ctx.drawImage(emblem, W / 2 - EMBLEM_SIZE / 2, EMBLEM_CY - EMBLEM_SIZE / 2, EMBLEM_SIZE, EMBLEM_SIZE);
+    } else {
+      drawFallbackEmblem(ctx, font, o, W / 2, EMBLEM_CY);
+    }
 
     // Nama pemain
+    ctx.textAlign = 'center';
     const name = o.name.length > 22 ? o.name.slice(0, 21) + '…' : o.name;
     ctx.fillStyle = '#ffffff';
     ctx.font = font(36);
-    ctx.fillText(name.toUpperCase(), W / 2, 266);
+    ctx.fillText(name.toUpperCase(), W / 2, 346);
 
     // Rank
     ctx.fillStyle = col;
     ctx.font = font(60);
-    ctx.fillText(`${o.tier.name.toUpperCase()}${o.division ? ' ' + o.division : ''}`, W / 2, 334);
+    ctx.fillText(`${o.tier.name.toUpperCase()}${o.division ? ' ' + o.division : ''}`, W / 2, 414);
 
     // MMR
     ctx.fillStyle = '#b8b8c8';
     ctx.font = font(26);
     const mmrText = o.fromMmr == null ? `${o.toMmr} MMR` : `${o.fromMmr}  >  ${o.toMmr} MMR`;
-    ctx.fillText(mmrText, W / 2, 376);
+    ctx.fillText(mmrText, W / 2, 458);
 
     return canvas.toBuffer('image/png');
   } catch (err) {
@@ -132,5 +173,9 @@ function renderRankCard(o) {
     return null;
   }
 }
+
+// Mulai memuat emblem begitu modul di-require (saat bot start)
+const L0 = load();
+if (L0) preloadEmblems(L0);
 
 module.exports = { renderRankCard };
