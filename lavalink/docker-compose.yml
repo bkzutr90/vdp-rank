@@ -1,0 +1,9 @@
+# Untuk dijalankan di VPS / lokal. Di Railway pakai Dockerfile saja.
+services:
+  lavalink:
+    build: .
+    restart: unless-stopped
+    volumes:
+      - ./plugins:/opt/Lavalink/plugins
+    ports:
+      - "2333:2333"
