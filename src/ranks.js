@@ -1,11 +1,11 @@
 const TIERS = [
-  { name: 'Bronze', emoji: '🥉', color: '#cd7f32', min: 0, max: 999 },
-  { name: 'Silver', emoji: '🥈', color: '#c0c7d1', min: 1000, max: 1199 },
-  { name: 'Gold', emoji: '🥇', color: '#ffd24a', min: 1200, max: 1399 },
-  { name: 'Platinum', emoji: '💎', color: '#4fd6c8', min: 1400, max: 1599 },
-  { name: 'Diamond', emoji: '🔥', color: '#4aa8ff', min: 1600, max: 1799 },
-  { name: 'Master', emoji: '👑', color: '#b36bff', min: 1800, max: 1999 },
-  { name: 'Grandmaster', emoji: '☠️', color: '#ff4d4d', min: 2000, max: Infinity },
+  { name: 'Rookie',        emoji: '🔰', color: '#cd7f32', min: 0,    max: 999 },
+  { name: 'Bloodhound',    emoji: '🎯', color: '#c0c7d1', min: 1000, max: 1199 },
+  { name: 'Executioner',   emoji: '⚔️', color: '#ffd24a', min: 1200, max: 1399 },
+  { name: 'Phantom',       emoji: '👁️', color: '#4fd6c8', min: 1400, max: 1599 },
+  { name: 'Reaper',        emoji: '☠️', color: '#4aa8ff', min: 1600, max: 1799 },
+  { name: 'Overlord',      emoji: '✦', color: '#b36bff', min: 1800, max: 1999 },
+  { name: 'Apex Predator', emoji: '♛', color: '#ff4d4d', min: 2000, max: Infinity },
 ];
 
 const DIVISIONS = ['I', 'II', 'III']; // I = bawah, III = atas tier
