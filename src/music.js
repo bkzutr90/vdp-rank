@@ -49,7 +49,7 @@ function patchYtDlp() {
       '  shift',
       '  if [ "$a" != "--no-call-home" ]; then set -- "$@" "$a"; fi',
       'done',
-      `exec "$real" --js-runtimes deno:${path.join(__dirname, '..', 'node_modules', '.bin', 'deno')} "$@"`,
+      `exec "$real" --js-runtimes node --remote-components ejs:github "$@"`,
       '',
     ].join('\n');
 
