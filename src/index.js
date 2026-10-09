@@ -77,5 +77,6 @@ client.on('interactionCreate', async (i) => {
 });
 
 process.on('unhandledRejection', (err) => console.error('[unhandledRejection]', err));
+process.on('uncaughtException', (err) => console.error('[uncaughtException]', err));
 
 client.login(cfg.token);
