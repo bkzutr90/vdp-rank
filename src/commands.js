@@ -2,6 +2,7 @@ const {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
+  ChannelType,
   EmbedBuilder,
   MessageFlags,
   PermissionFlagsBits,
@@ -451,6 +452,60 @@ add(
       content: `✅ MMR ${roleLabel} <@${target.id}>: ${old} → **${next}** (${sign}${diff})${skip ? '\n📌 Placement role ini dianggap selesai.' : ''}${rankChange}`,
       allowedMentions: { parse: [] },
     });
+  }
+);
+
+// ---------------------------------------------------------------- /cleanup-lobbies (admin)
+add(
+  new SlashCommandBuilder()
+    .setName('cleanup-lobbies')
+    .setDescription('Hapus channel match-xxxxxx yang yatim (tidak terkait match aktif)')
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+    .addBooleanOption((o) =>
+      o
+        .setName('reset_matches')
+        .setDescription('Juga void SEMUA match aktif/dispute dan kosongkan queue (hati-hati)')
+    ),
+  async (i) => {
+    if (!isMod(i)) return i.reply({ content: '❌ Hanya admin/mod.', flags: EPHEMERAL });
+    await i.deferReply({ flags: EPHEMERAL });
+
+    const reset = i.options.getBoolean('reset_matches') || false;
+    if (reset) {
+      db.prepare("UPDATE matches SET status='void', finished_at=strftime('%s','now') WHERE status IN ('active','disputed')").run();
+      db.prepare('DELETE FROM queue').run();
+    }
+
+    // Channel milik match yang masih aktif/dispute tidak boleh disentuh
+    const keep = new Set(
+      db
+        .prepare("SELECT channel_id FROM matches WHERE status IN ('active','disputed') AND channel_id IS NOT NULL")
+        .all()
+        .map((r) => r.channel_id)
+    );
+    const channels = await i.guild.channels.fetch();
+    const targets = [...channels.values()].filter(
+      (c) => c && c.type === ChannelType.GuildText && /^match-\d{6}$/.test(c.name) && !keep.has(c.id)
+    );
+
+    await i.editReply(
+      `🧹 Menghapus **${targets.length}** channel di background${reset ? ' (match aktif di-void, queue dikosongkan)' : ''}. ` +
+        'Hasil akhirnya dikirim ke channel admin. Penghapusan massal kena rate limit Discord, jadi bisa makan beberapa menit.'
+    );
+
+    let deleted = 0;
+    let failed = 0;
+    for (const ch of targets) {
+      try {
+        await ch.delete('Cleanup lobby yatim');
+        deleted++;
+      } catch {
+        failed++;
+      }
+    }
+    const msg = `🧹 Cleanup lobby selesai oleh <@${i.user.id}>: ${deleted} channel dihapus${failed ? `, ${failed} gagal` : ''}.`;
+    console.log(msg.replace(/<@\d+>/, i.user.username));
+    await sendAdmin(i.client, { content: msg, allowedMentions: { parse: [] } });
   }
 );
 
