@@ -15,6 +15,7 @@ const { lookupUser, getDescription, profileUrl } = require('./roblox');
 const { rankPayload, overallLabel, emblemOf, rowTier } = require('./embeds');
 const { sendAdmin, freezeRow, isMod } = require('./matches');
 const { syncRank } = require('./roles');
+const { panelPayload, savePanel } = require('./panel');
 const party = require('./party');
 
 const EPHEMERAL = MessageFlags.Ephemeral;
@@ -519,25 +520,10 @@ add(
     .setDescription('Kirim panel Ranked Queue di channel ini')
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
   async (i) => {
-    const embed = new EmbedBuilder()
-      .setColor(0xe74c3c)
-      .setTitle('🔥 VDP RANKED')
-      .setDescription(
-        'Tekan **Join Queue**, lalu tunggu match ditemukan.\n\n' +
-          '**Format:** 1 🔪 Killer vs 4 🏃 Survivor\n' +
-          '**Role:** diacak otomatis saat match ditemukan 🎲\n' +
-          '**Wajib:** akun Roblox terverifikasi (`/verify`)\n' +
-          '**Party:** `/party create` → `/party invite` → leader tekan **Party Queue** (party selalu jadi Survivor)\n\n' +
-          'Rating Killer & Survivor dihitung **terpisah**. Menang/kalah juga memberi **Ranked Points**.'
-      );
-    const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('q:join').setLabel('🎮 Join Queue').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId('q:party').setLabel('👥 Party Queue').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId('q:leave').setLabel('❌ Leave Queue').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId('q:rank').setLabel('📊 My Rank').setStyle(ButtonStyle.Secondary)
-    );
-    await i.channel.send({ embeds: [embed], components: [row] });
-    return i.reply({ content: '✅ Panel dikirim.', flags: EPHEMERAL });
+    // Panel menampilkan status queue live; lokasinya disimpan supaya bisa diperbarui otomatis
+    const msg = await i.channel.send(panelPayload());
+    savePanel(msg.channelId, msg.id);
+    return i.reply({ content: '✅ Panel dikirim. Status queue di panel akan diperbarui otomatis.', flags: EPHEMERAL });
   }
 );
 

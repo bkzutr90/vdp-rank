@@ -5,6 +5,7 @@ const { runMatchmaking, handleQueueButton } = require('./matchmaking');
 const { handleVote, handleAdmin, handleFreezeButton } = require('./matches');
 const { handlePartyButton } = require('./party');
 const { sweepMatches } = require('./timeouts');
+const { startLive } = require('./queueLive');
 
 if (!cfg.token || !cfg.guildId) {
   console.error('DISCORD_TOKEN dan GUILD_ID wajib diisi (Variables di Railway / .env)');
@@ -40,6 +41,8 @@ client.once('clientReady', async () => {
   setInterval(() => sweepMatches(client), cfg.sweepIntervalMs);
   runMatchmaking(client);
   sweepMatches(client);
+  // Status queue live: perbarui pesan penunggu & panel secara otomatis
+  startLive(client);
 });
 
 client.on('interactionCreate', async (i) => {

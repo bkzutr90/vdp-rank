@@ -11,6 +11,7 @@ const { profileUrl } = require('./roblox');
 const { resultButtons, sendAdmin } = require('./matches');
 const { rankPayload } = require('./embeds');
 const { getPartyOf, members, isPartyQueued } = require('./party');
+const { registerWaiter, notifyQueueChanged } = require('./queueLive');
 
 let running = false;
 
@@ -225,6 +226,7 @@ async function runMatchmaking(client) {
   if (running) return;
   if (Date.now() < pausedUntil) return;
   running = true;
+  let created = 0;
   try {
     for (;;) {
       const found = findMatch();
@@ -233,6 +235,7 @@ async function runMatchmaking(client) {
       const res = await createMatch(client, found.killer, found.survivors);
       if (res.ok) {
         failStreak = 0;
+        created += 1;
         continue;
       }
 
@@ -253,11 +256,8 @@ async function runMatchmaking(client) {
     console.error('[matchmaking] error:', err);
   } finally {
     running = false;
+    if (created) notifyQueueChanged(client);
   }
-}
-
-function queueCount() {
-  return db.prepare('SELECT COUNT(*) AS c FROM queue').get().c;
 }
 
 // Mengembalikan pesan error (string) atau null kalau pemain boleh antre
@@ -289,6 +289,7 @@ async function handleQueueButton(interaction, action, client) {
 
   if (action === 'leave') {
     const n = removeFromQueue(id);
+    notifyQueueChanged(client);
     return interaction.editReply(n > 1 ? '✅ Party kamu keluar dari queue.' : n ? '✅ Kamu keluar dari queue.' : 'Kamu tidak sedang di queue.');
   }
 
@@ -320,10 +321,9 @@ async function handleQueueButton(interaction, action, client) {
     if (!db.prepare('SELECT 1 FROM queue WHERE discord_id=?').get(id)) {
       return interaction.editReply('🔥 **Match ditemukan!** Cek channel lobby baru untuk party kamu.');
     }
-    return interaction.editReply(
-      `🔎 Party (${mem.length} orang) searching sebagai **🏃 Survivor**...\n` +
-        `Queue: ${queueCount()} pemain (butuh ${need}). Maksimal 1 party per match.`
-    );
+    const text = registerWaiter(id, interaction, { party: mem.length });
+    notifyQueueChanged(client);
+    return interaction.editReply(text);
   }
 
   // ---------------- Solo queue (role diacak saat match ditemukan)
@@ -345,10 +345,9 @@ async function handleQueueButton(interaction, action, client) {
     return interaction.editReply('🔥 **Match ditemukan!** Cek channel lobby baru untukmu. Role kamu sudah diacak di sana.');
   }
 
-  return interaction.editReply(
-    `🔎 Searching for match...\n` +
-      `Queue: ${queueCount()} pemain (butuh ${need}). 🎲 Role (🔪 Killer / 🏃 Survivor) diacak saat match ditemukan.`
-  );
+  const text = registerWaiter(id, interaction);
+  notifyQueueChanged(client);
+  return interaction.editReply(text);
 }
 
 module.exports = { runMatchmaking, handleQueueButton };
