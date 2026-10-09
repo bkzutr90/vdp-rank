@@ -382,6 +382,9 @@ add(
     .addIntegerOption((o) =>
       o.setName('jumlah').setDescription('Angka MMR (untuk Set: MMR akhir)').setRequired(true).setMinValue(0).setMaxValue(MAX_MMR)
     )
+    .addBooleanOption((o) =>
+      o.setName('skip_placement').setDescription('Anggap placement role ini selesai, supaya rank langsung tampil')
+    )
     .addStringOption((o) => o.setName('alasan').setDescription('Alasan (tercatat di log admin)').setMaxLength(300)),
   async (i) => {
     if (!isMod(i)) return i.reply({ content: '❌ Hanya admin/mod.', flags: EPHEMERAL });
@@ -392,6 +395,7 @@ add(
     const mode = i.options.getString('mode', true);
     const amount = i.options.getInteger('jumlah', true);
     const reason = i.options.getString('alasan') || '-';
+    const skip = i.options.getBoolean('skip_placement') || false;
     const season = getSeason();
 
     const stat = getStat(target.id, role, season);
@@ -402,7 +406,9 @@ add(
     next = Math.max(0, Math.min(MAX_MMR, next));
 
     db.transaction(() => {
-      db.prepare('UPDATE stats SET mmr=?, peak=MAX(peak,?) WHERE discord_id=? AND season=? AND role=?').run(next, next, target.id, season, role);
+      db.prepare(
+        'UPDATE stats SET mmr=?, peak=MAX(peak,?), games=CASE WHEN ? THEN MAX(games,?) ELSE games END WHERE discord_id=? AND season=? AND role=?'
+      ).run(next, next, skip ? 1 : 0, cfg.placementGames, target.id, season, role);
       db.prepare(
         'INSERT INTO mmr_adjustments (discord_id, season, role, mmr_before, mmr_after, reason, by) VALUES (?,?,?,?,?,?,?)'
       ).run(target.id, season, role, old, next, reason, i.user.id);
@@ -425,12 +431,13 @@ add(
         { name: 'Role', value: roleLabel, inline: true },
         { name: 'MMR', value: `${old} → **${next}** (${sign}${diff})`, inline: true },
         { name: 'Oleh', value: `<@${i.user.id}>`, inline: true },
+        { name: 'Placement', value: skip ? `Dilewati (min. ${cfg.placementGames} game)` : 'Tidak diubah', inline: true },
         { name: 'Alasan', value: reason }
       );
     await sendAdmin(i.client, { embeds: [embed], allowedMentions: { parse: [] } });
 
     return i.editReply({
-      content: `✅ MMR ${roleLabel} <@${target.id}>: ${old} → **${next}** (${sign}${diff})${rankChange}`,
+      content: `✅ MMR ${roleLabel} <@${target.id}>: ${old} → **${next}** (${sign}${diff})${skip ? '\n📌 Placement role ini dianggap selesai.' : ''}${rankChange}`,
       allowedMentions: { parse: [] },
     });
   }
