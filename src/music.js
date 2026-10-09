@@ -39,6 +39,7 @@ function initMusic(client) {
     // DisTube v5 tidak punya auto-leave, jadi bot memang tidak keluar sendiri (24/7).
     ...(ffmpegPath ? { ffmpeg: { path: ffmpegPath } } : {}),
   });
+  distube.on('debug', (msg) => console.log('[distube debug]', msg));
 
   distube
     .on('playSong', (queue, song) => {
