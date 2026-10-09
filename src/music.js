@@ -3,7 +3,7 @@
 // Ganti engine lewat env var MUSIC_ENGINE=ytdlp (kembali ke setup lama) tanpa ubah kode.
 // Mode 24/7: bot TIDAK keluar saat voice kosong / queue habis / stop. Satu-satunya cara keluar: /leave.
 // Channel voice terakhir disimpan di tabel settings, jadi bot masuk lagi otomatis setelah restart / ke-disconnect.
-// FFmpeg: memakai ffmpeg sistem (PATH). ffmpeg-static dibuang karena crash SIGSEGV di container Railway.
+// FFmpeg: memakai ffmpeg sistem (PATH). ffmpeg-static dibuang karena crash SIGSEGV di container Railway..
 const fs = require('fs');
 const path = require('path');
 const { execFile } = require('child_process');
