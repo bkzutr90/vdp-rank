@@ -1,11 +1,11 @@
 const TIERS = [
-  { name: 'Rookie',        emoji: '🔰', color: '#cd7f32', min: 0,    max: 999 },
-  { name: 'Bloodhound',    emoji: '🎯', color: '#c0c7d1', min: 1000, max: 1199 },
-  { name: 'Executioner',   emoji: '⚔️', color: '#ffd24a', min: 1200, max: 1399 },
-  { name: 'Phantom',       emoji: '👁️', color: '#4fd6c8', min: 1400, max: 1599 },
-  { name: 'Reaper',        emoji: '☠️', color: '#4aa8ff', min: 1600, max: 1799 },
-  { name: 'Overlord',      emoji: '✦', color: '#b36bff', min: 1800, max: 1999 },
-  { name: 'Apex Predator', emoji: '♛', color: '#ff4d4d', min: 2000, max: Infinity },
+  { name: 'Rookie',        emoji: '⚔', color: '#CD7F32', min: 0,    max: 999 },
+  { name: 'Bloodhound',    emoji: '◎', color: '#C0C7D1', min: 1000, max: 1199 },
+  { name: 'Executioner',   emoji: '⚔', color: '#FFD24A', min: 1200, max: 1399 },
+  { name: 'Phantom',       emoji: '◈', color: '#4FD6C8', min: 1400, max: 1599 },
+  { name: 'Reaper',        emoji: '☠', color: '#4AA8FF', min: 1600, max: 1799 },
+  { name: 'Overlord',      emoji: '♛', color: '#B36BFF', min: 1800, max: 1999 },
+  { name: 'Apex Predator', emoji: '✦', color: '#FF4D4D', min: 2000, max: Infinity },
 ];
 
 const DIVISIONS = ['I', 'II', 'III']; // I = bawah, III = atas tier
