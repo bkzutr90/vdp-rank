@@ -1,0 +1,3 @@
+# Railway: yt-dlp butuh python3, DisTube butuh ffmpeg
+[phases.setup]
+nixPkgs = ["...", "python3", "ffmpeg"]

@@ -17,6 +17,7 @@ const { sendAdmin, freezeRow, isMod } = require('./matches');
 const { syncRank } = require('./roles');
 const { panelPayload, savePanel } = require('./panel');
 const party = require('./party');
+const music = require('./music');
 
 const EPHEMERAL = MessageFlags.Ephemeral;
 const MEDALS = ['🥇', '🥈', '🥉'];
@@ -566,6 +567,9 @@ add(
 
 // ---------------------------------------------------------------- /party
 add(party.data, party.execute);
+
+// ---------------------------------------------------------------- musik (24/7)
+for (const c of music.commands) add(c.data, c.execute);
 
 // ---------------------------------------------------------------- /setup-panel (admin)
 add(

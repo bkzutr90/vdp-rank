@@ -6,13 +6,15 @@ const { handleVote, handleAdmin, handleFreezeButton } = require('./matches');
 const { handlePartyButton } = require('./party');
 const { sweepMatches } = require('./timeouts');
 const { startLive } = require('./queueLive');
+const { initMusic, restoreMusic } = require('./music');
 
 if (!cfg.token || !cfg.guildId) {
   console.error('DISCORD_TOKEN dan GUILD_ID wajib diisi (Variables di Railway / .env)');
   process.exit(1);
 }
 
-const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates] });
+initMusic(client);
 
 // Daftarkan semua slash command ke server (dijalankan otomatis tiap bot start)
 async function registerCommands(clientId) {
@@ -43,6 +45,8 @@ client.once('clientReady', async () => {
   sweepMatches(client);
   // Status queue live: perbarui pesan penunggu & panel secara otomatis
   startLive(client);
+  // Musik 24/7: masuk lagi ke voice channel terakhir
+  restoreMusic(client);
 });
 
 client.on('interactionCreate', async (i) => {
