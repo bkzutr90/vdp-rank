@@ -3,11 +3,13 @@ server:
   address: 0.0.0.0
 lavalink:
   plugins:
-    # cek versi terbaru di https://github.com/lavalink-devs/youtube-source/releases
-    - dependency: "dev.lavalink.youtube:youtube-plugin:1.18.2"
-      snapshot: false
+    # Snapshot (belum rilis resmi) yang memperbaiki playback YouTube SABR-only.
+    # Kalau sudah ada rilis resmi 1.18.3+ di https://github.com/lavalink-devs/youtube-source/releases,
+    # ganti ke versi itu dan set snapshot: false.
+    - dependency: "dev.lavalink.youtube:youtube-plugin:f45bbb7aebfcbc1c553769e04af6cd43afa8b7c3"
+      snapshot: true
   server:
-    password: "bkzutr9090"   # samakan dengan LAVALINK_PASSWORD di bot
+    password: "GANTI_PASSWORD_KAMU"   # samakan dengan LAVALINK_PASSWORD di bot
     sources:
       youtube: false              # dimatikan, diganti plugin youtube-source
       bandcamp: true
@@ -29,15 +31,19 @@ plugins:
     clients:
       - MUSIC
       - WEB
-      - TVHTML5EMBEDDED
+      - TVHTML5_SIMPLY
+      - TV
+      - MWEB
       - ANDROID_VR
-    # Kalau muncul "Sign in to confirm you're not a bot", isi salah satu:
+    # Server cipher publik (tanpa password) untuk membuka signature YouTube.
+    remoteCipher:
+      url: "https://cipher.kikkia.dev/"
+      userAgent: "vdp-ranked"
+    # Kalau masih "requires login", aktifkan OAuth (pakai akun Google cadangan, JANGAN akun utama):
     # oauth:
     #   enabled: true
-    # pot:
-    #   token: "ISI_PO_TOKEN"
-    #   visitorData: "ISI_VISITOR_DATA"
 logging:
   level:
     root: INFO
     lavalink: INFO
+    dev.lavalink.youtube.http.YoutubeOauth2Handler: INFO
