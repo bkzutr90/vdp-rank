@@ -120,6 +120,10 @@ function initMusic(client) {
   distube.on('debug', (msg) => console.log('[distube debug]', msg));
   distube.on('ffmpegDebug', (msg) => console.log('[ffmpeg]', String(msg).slice(0, 300)));
 
+  distube.on('initQueue', (queue) => {
+    queue.volume = 100;
+  });
+
   distube
     .on('playSong', (queue, song) => {
       const e = new EmbedBuilder()
