@@ -3,7 +3,13 @@
 // Ganti engine lewat env var MUSIC_ENGINE=ytdlp (kembali ke setup lama) tanpa ubah kode.
 // Mode 24/7: bot TIDAK keluar saat voice kosong / queue habis / stop. Satu-satunya cara keluar: /leave.
 // Channel voice terakhir disimpan di tabel settings, jadi bot masuk lagi otomatis setelah restart / ke-disconnect.
-// FFmpeg: memakai ffmpeg sistem (PATH). ffmpeg-static dibuang karena crash SIGSEGV di container Railway..
+// FFmpeg: memakai ffmpeg sistem (PATH). ffmpeg-static dibuang karena crash SIGSEGV di container Railway.
+//
+// Env opsional:
+//   MUSIC_ENGINE=ytdlp          -> paksa engine yt-dlp
+//   YTDLP_REMOTE_COMPONENTS=1   -> yt-dlp mengunduh komponen JS challenge (ejs) dari GitHub tiap panggilan.
+//                                  Hanya nyalakan kalau yt-dlp kamu butuh dan koneksi ke GitHub lancar.
+//   PLAY_TIMEOUT_MS=45000       -> batas waktu /play sebelum dibatalkan
 const fs = require('fs');
 const path = require('path');
 const { execFile } = require('child_process');
@@ -24,6 +30,8 @@ try {
 const EPHEMERAL = MessageFlags.Ephemeral;
 const NO_PING = { parse: [] };
 const KEY = 'music_vc';
+const PLAY_TIMEOUT_MS = Number(process.env.PLAY_TIMEOUT_MS) || 45000;
+const REMOTE_COMPONENTS = process.env.YTDLP_REMOTE_COMPONENTS === '1';
 
 // 'native' (default) atau 'ytdlp'
 const USE_NATIVE = YouTubePlugin && (process.env.MUSIC_ENGINE || 'native').toLowerCase() !== 'ytdlp';
@@ -33,14 +41,42 @@ let distube = null;
 // Lokasi binary yt-dlp bawaan @distube/yt-dlp (src/music.js -> ../node_modules/...)
 const YTDLP = path.join(__dirname, '..', 'node_modules', '@distube', 'yt-dlp', 'bin', 'yt-dlp');
 
+// ------------------------------------------------------------------ util
+// Batasi waktu sebuah promise supaya bot tidak "thinking" selamanya.
+const withTimeout = (p, ms, msg = 'YouTube terlalu lama merespons') =>
+  Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error(`Timeout: ${msg}`)), ms))]);
+
+// Buang parameter YouTube Mix (list=RD...) supaya tidak me-resolve playlist tak terbatas.
+// Playlist asli (list=PL...) tetap dibiarkan.
+function cleanUrl(input) {
+  try {
+    const u = new URL(input);
+    const list = u.searchParams.get('list') || '';
+    if (u.searchParams.get('v') && list.startsWith('RD')) {
+      u.searchParams.delete('list');
+      u.searchParams.delete('start_radio');
+      u.searchParams.delete('index');
+      return u.toString();
+    }
+  } catch {
+    // bukan URL, biarkan apa adanya
+  }
+  return input;
+}
+
 // @distube/yt-dlp masih mengirim opsi lama --no-call-home. yt-dlp terbaru mencetak "Deprecated Feature"
 // sehingga JSON.parse di plugin error dan bot crash. Solusi: bungkus binary dengan skrip yang membuang opsi itu.
+// Wrapper juga menambahkan JS runtime (node, pasti ada di container) supaya yt-dlp bisa menyelesaikan
+// challenge YouTube; tanpa itu URL stream kena throttle lalu putus.
 // Aman dijalankan berulang (idempotent), dipanggil tiap bot start.
 function patchYtDlp() {
   try {
     const dir = path.dirname(YTDLP);
     const real = path.join(dir, 'yt-dlp.real');
     if (!fs.existsSync(YTDLP)) return;
+
+    const extraFlags = [`--js-runtimes node:${process.execPath}`];
+    if (REMOTE_COMPONENTS) extraFlags.push('--remote-components ejs:github');
 
     const wrapper = [
       '#!/bin/sh',
@@ -49,7 +85,7 @@ function patchYtDlp() {
       '  shift',
       '  if [ "$a" != "--no-call-home" ]; then set -- "$@" "$a"; fi',
       'done',
-      `exec "$real" --js-runtimes node --remote-components ejs:github "$@"`,
+      `exec "$real" ${extraFlags.join(' ')} "$@"`,
       '',
     ].join('\n');
 
@@ -63,7 +99,7 @@ function patchYtDlp() {
     fs.writeFileSync(YTDLP, wrapper);
     fs.chmodSync(YTDLP, 0o755);
     fs.chmodSync(real, 0o755);
-    console.log('[music] yt-dlp dipatch (--no-call-home dibuang, JS runtime node aktif)');
+    console.log(`[music] yt-dlp dipatch (--no-call-home dibuang, JS runtime node aktif${REMOTE_COMPONENTS ? ', remote components ON' : ''})`);
   } catch (err) {
     console.warn('[music] gagal patch yt-dlp:', err.message);
   }
@@ -97,6 +133,9 @@ const setSaved = (id) =>
 const clearSaved = () => db.prepare('DELETE FROM settings WHERE key=?').run(KEY);
 
 // ------------------------------------------------------------------ init
+// Catat kapan lagu mulai diputar per guild, untuk mendeteksi stream yang putus sebelum waktunya.
+const playStartedAt = new Map();
+
 function initMusic(client) {
   // Cek versi library voice (boleh dihapus kalau sudah tidak perlu)
   console.log(generateDependencyReport());
@@ -126,6 +165,7 @@ function initMusic(client) {
 
   distube
     .on('playSong', (queue, song) => {
+      playStartedAt.set(queue.id, Date.now());
       const e = new EmbedBuilder()
         .setColor(0xe74c3c)
         .setTitle('🎶 Sedang diputar')
@@ -148,15 +188,24 @@ function initMusic(client) {
         ?.send({ content: `📃 Playlist **${playlist.name}** (${playlist.songs.length} lagu) masuk queue.`, allowedMentions: NO_PING })
         .catch(() => {});
     })
+    .on('finish', (queue) => {
+      // Diagnosa: kalau lagu selesai jauh lebih cepat dari durasinya, berarti stream putus (bukan selesai normal).
+      const started = playStartedAt.get(queue.id);
+      playStartedAt.delete(queue.id);
+      const song = queue.songs?.[0];
+      if (started && song?.duration) {
+        const elapsed = Math.round((Date.now() - started) / 1000);
+        const tag = elapsed < song.duration * 0.9 ? 'KEMUNGKINAN STREAM PUTUS' : 'selesai normal';
+        console.log(`[music] finish: diputar ${elapsed}s dari ${song.duration}s -> ${tag}`);
+      } else {
+        console.log('[music] queue selesai');
+      }
+    })
     .on('error', (err, queue) => {
       console.error('[music] error:', err);
       queue?.textChannel?.send(`❌ Gagal memutar: \`${String(err.message || err).slice(0, 200)}\``).catch(() => {});
     });
 
-  distube.on('finish', (queue) => {
-    console.log('[music] queue selesai (bisa karena stream putus, cek log ffmpeg di atas)');
-  });
-  
   // Backstop 24/7: kalau bot ke-disconnect, masuk lagi. Kalau dipindah admin, ikuti channel barunya.
   client.on('voiceStateUpdate', (oldS, newS) => {
     if (newS.member?.id !== client.user.id) return;
@@ -215,14 +264,14 @@ def(
     const vc = userVoice(i);
     if (!vc) return i.reply({ content: '❌ Masuk ke voice channel dulu.', flags: EPHEMERAL });
     await i.deferReply();
-    const query = i.options.getString('query', true);
+    const query = i.options.getString('query', true).trim();
     try {
-      let input = query;
+      let input = cleanUrl(query); // buang list=RD... (YouTube Mix) kalau ada
       if (!USE_NATIVE && !/^https?:\/\//i.test(query)) {
         // Mode yt-dlp: teks biasa dicari dulu lewat yt-dlp. Mode native: plugin mencari sendiri.
         input = await searchYoutube(query);
       }
-      await distube.play(vc, input, { member: i.member, textChannel: i.channel });
+      await withTimeout(distube.play(vc, input, { member: i.member, textChannel: i.channel }), PLAY_TIMEOUT_MS);
       setSaved(vc.id);
       return i.editReply(`🔎 Mencari **${query.slice(0, 100)}**...`);
     } catch (err) {
