@@ -6,6 +6,8 @@ const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js'
 const { DisTube } = require('distube');
 const { YtDlpPlugin } = require('@distube/yt-dlp');
 const { db } = require('./db');
+const { generateDependencyReport } = require('@discordjs/voice');
+console.log(generateDependencyReport());
 
 const EPHEMERAL = MessageFlags.Ephemeral;
 const NO_PING = { parse: [] };
