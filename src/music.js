@@ -105,6 +105,8 @@ function initMusic(client) {
   // Log debug DisTube (boleh dihapus kalau sudah normal)
   distube.on('debug', (msg) => console.log('[distube debug]', msg));
 
+  distube.on('ffmpegDebug', (msg) => console.log('[ffmpeg]', msg));
+
   distube
     .on('playSong', (queue, song) => {
       const e = new EmbedBuilder()
