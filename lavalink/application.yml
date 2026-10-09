@@ -4,7 +4,7 @@ server:
 lavalink:
   plugins:
     # cek versi terbaru di https://github.com/lavalink-devs/youtube-source/releases
-    - dependency: "dev.lavalink.youtube:youtube-plugin:1.13.3"
+    - dependency: "dev.lavalink.youtube:youtube-plugin:1.18.2"
       snapshot: false
   server:
     password: "bkzutr9090"   # samakan dengan LAVALINK_PASSWORD di bot
