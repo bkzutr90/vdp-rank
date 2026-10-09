@@ -135,6 +135,7 @@ def(
       return i.editReply(`🔎 Mencari **${query.slice(0, 100)}**...`);
     } catch (err) {
       console.error('[music] play gagal:', err);
+      if (err.cause) console.error('[music] cause:', err.cause);
       return i.editReply(`❌ Tidak bisa memutar: \`${String(err.message || err).slice(0, 200)}\``);
     }
   }
